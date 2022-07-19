@@ -1,9 +1,13 @@
 name: CI/CD
 
+# main branch 에 push 될 때 동작시키겠단 뜻이다.
+# 참고로 그냥 push 뿐만 아니라 merge 도 push event 를 발생하니
+# push 나 merge 가 발생하면 동작한다.
 on:
   push:
     branches: [main]
 
+# 사용할 환경 변수를 미리 지정한다.
 env:
   DOCKER_IMAGE: ghcr.io/${{ github.actor }}/trading
   VERSION: ${{ github.sha }}
@@ -14,8 +18,10 @@ jobs:
     name: Build
     runs-on: ubuntu-latest
     steps:
+      # 소스 코드를 컨테이너 안으로 Checkout
       - name: Checkout source code
         uses: actions/checkout@v2
+      # 가상의 컨테이너 안에 Docker 가 돌아갈 수 있는 환경 설치
       - name: Set up docker buildx
         id: buildx
         uses: docker/setup-buildx-action@v1
@@ -26,16 +32,19 @@ jobs:
           key: ${{ runner.os }}-buildx-${{ env.VERSION }}
           restore-keys: |
             ${{ runner.os }}-buildx-
+      # Github Secrets 에 설정해둔 GHCR_TOKEN 으로 GHCR(GitHub Container Registry) 로그인
       - name: Login to ghcr
         uses: docker/login-action@v1
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GHCR_TOKEN }}
+      # GHCR 에 Docker Image 를 빌드 한 후 Push
       - name: Build and push
         id: docker_build
         uses: docker/build-push-action@v2
         with:
+          # 여기서 steps.buildx 는 두 번째 단계에서 id 를 buildx 로 설정해서 불러온 것이다.
           builder: ${{ steps.buildx.outputs.name }}
           push: true
           tags: ${{ env.DOCKER_IMAGE }}:latest
@@ -45,13 +54,16 @@ jobs:
     name: Deploy
     runs-on: [self-hosted, label-nestjs]
     steps:
+      # GHCR 에 로그인
       - name: Login to ghcr
         uses: docker/login-action@v1
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GHCR_TOKEN }}
+      # 실행 중인 Docker Container 중지, 이전 버전 Container 와 Image 삭제, 새로운 Image 로 Container 실행.
       - name: Docker run
+        # 외부에서 8080 포트로 요청이 들어오면 내부의 5000 포트로 요청을 넘겨준다.
         run: |
           docker stop ${{ env.NAME }} && docker rm ${{ env.NAME }} && docker rmi ${{ env.DOCKER_IMAGE }}:latest
           docker run -d -p 8080:5000 --name nestjs_cicd --restart always ${{ env.DOCKER_IMAGE }}:latest
